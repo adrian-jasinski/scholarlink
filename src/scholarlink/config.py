@@ -9,14 +9,15 @@ from pydantic import BaseModel, Field
 # Default extraction instruction (long string)
 _DEFAULT_AUTHORS_EXTRACTION_INSTRUCTION = """
 From this scientific article page, extract all publication authors with details.
+Return a single JSON object with exactly one key "authors" whose value is a list of author objects.
 For each author, extract in order of appearance:
 - name: full name (required)
 - affiliation: university, department, or institution if shown
 - contact: email or other contact if available
 - orcid: ORCID ID if shown (e.g. from "View ORCID Profile" link)
 - other: any other author data (roles, identifiers, etc.) if available
-Return a list of author objects. Use empty string for missing optional fields.
-Preserve the exact spelling and order. Put ORCID ID in orcid, not in name.
+Use empty string for missing optional fields. Preserve the exact spelling and order.
+Put ORCID ID in orcid, not in name.
 """.strip()
 
 
@@ -33,7 +34,12 @@ class ScholarlinkConfig(BaseModel):
         description="Delay in seconds when protected, not manual.",
     )
     protected_domains: list[str] = Field(
-        default_factory=lambda: ["biorxiv.org", "www.biorxiv.org"],
+        default_factory=lambda: [
+            "biorxiv.org",
+            "www.biorxiv.org",
+            "pnas.org",
+            "www.pnas.org",
+        ],
         description="Default Cloudflare-protected hostnames.",
     )
     cloudflare_phrases: list[str] = Field(

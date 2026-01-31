@@ -6,9 +6,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from crawl4ai import CacheMode, LLMExtractionStrategy
 
+from scholarlink.config import get_config, reset_config
 from scholarlink.crawler import (
-    CLOUDFLARE_MANUAL_WAIT_SECONDS,
-    DEFAULT_PROTECTED_DOMAINS,
     ExtractionError,
     _build_crawler_kwargs,
     _build_run_config,
@@ -28,8 +27,15 @@ def test_is_protected_domain_biorxiv_true() -> None:
     assert _is_protected_domain("https://biorxiv.org/content/10.1101/123") is True
 
 
-def test_is_protected_domain_pnas_true() -> None:
-    """URL with pnas.org host returns True."""
+def test_is_protected_domain_pnas_true(monkeypatch: pytest.MonkeyPatch) -> None:
+    """URL with pnas.org host returns True when pnas is in protected_domains."""
+    from scholarlink import crawler as crawler_module
+
+    monkeypatch.setattr(
+        crawler_module,
+        "_get_protected_domains",
+        lambda: frozenset({"biorxiv.org", "www.biorxiv.org", "pnas.org", "www.pnas.org"}),
+    )
     assert _is_protected_domain("https://www.pnas.org/doi/10.1073/123") is True
 
 
@@ -48,12 +54,14 @@ def test_is_protected_domain_empty_or_invalid_false() -> None:
 def test_get_protected_domains_default(monkeypatch: pytest.MonkeyPatch) -> None:
     """With env unset, returns default frozenset."""
     monkeypatch.delenv("SCHOLARLINK_PROTECTED_DOMAINS", raising=False)
-    assert _get_protected_domains() == DEFAULT_PROTECTED_DOMAINS
+    reset_config()
+    assert _get_protected_domains() == get_config().protected_domains_frozenset()
 
 
 def test_get_protected_domains_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
     """With env set, returns frozenset of normalized hosts."""
     monkeypatch.setenv("SCHOLARLINK_PROTECTED_DOMAINS", "a.com, b.com ")
+    reset_config()
     domains = _get_protected_domains()
     assert domains == frozenset({"a.com", "b.com"})
 
@@ -61,6 +69,7 @@ def test_get_protected_domains_from_env(monkeypatch: pytest.MonkeyPatch) -> None
 def test_is_protected_domain_uses_custom_env(monkeypatch: pytest.MonkeyPatch) -> None:
     """When SCHOLARLINK_PROTECTED_DOMAINS is set, only those hosts are protected."""
     monkeypatch.setenv("SCHOLARLINK_PROTECTED_DOMAINS", "a.com,b.com")
+    reset_config()
     assert _is_protected_domain("https://a.com/foo") is True
     assert _is_protected_domain("https://www.biorxiv.org/foo") is False
 
@@ -103,6 +112,21 @@ def test_parse_extraction_result_list_wrapper() -> None:
     meta = _parse_extraction_result(raw, "https://example.com/paper")
     assert len(meta.authors) == 1
     assert meta.authors[0].name == "A"
+
+
+def test_parse_extraction_result_list_of_author_dicts() -> None:
+    """LLM returns bare list of author dicts (e.g. biorxiv) wraps to PaperMetadata."""
+    raw = json.dumps(
+        [
+            _author_dict("Alice", "MIT", "", "", ""),
+            _author_dict("Bob", "Stanford", "bob@stanford.edu", "0000-0002-3456-7890", ""),
+        ]
+    )
+    meta = _parse_extraction_result(raw, "https://example.com/paper")
+    assert len(meta.authors) == 2
+    assert meta.authors[0].name == "Alice" and meta.authors[0].affiliation == "MIT"
+    assert meta.authors[1].name == "Bob" and meta.authors[1].contact == "bob@stanford.edu"
+    assert meta.authors[1].orcid == "0000-0002-3456-7890"
 
 
 def test_parse_extraction_result_empty_string_raises() -> None:
@@ -173,8 +197,9 @@ def test_get_delay_and_notify_protected_no_manual() -> None:
 
 
 def test_get_delay_and_notify_protected_manual() -> None:
-    """When protected and cloudflare_manual, returns CLOUDFLARE_MANUAL_WAIT_SECONDS."""
-    assert _get_delay_and_notify(True, True) == CLOUDFLARE_MANUAL_WAIT_SECONDS
+    """When protected and cloudflare_manual, returns config cloudflare_manual_wait_seconds."""
+    reset_config()
+    assert _get_delay_and_notify(True, True) == get_config().cloudflare_manual_wait_seconds
 
 
 def test_get_delay_and_notify_protected_manual_prints_stderr(

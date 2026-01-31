@@ -136,7 +136,13 @@ def _parse_extraction_result(raw: str, url: str) -> PaperMetadata:
             raise ExtractionError(
                 f"No structured data was extracted from {url}. The LLM returned an empty list."
             )
-        data = data[0]
+        first = data[0]
+        if isinstance(first, dict) and "authors" in first:
+            data = first
+        elif isinstance(first, dict) and "name" in first and "authors" not in first:
+            data = {"authors": data}
+        else:
+            data = first
     if not isinstance(data, dict):
         raise ExtractionError(
             f"Extraction returned unexpected type from {url}: expected dict, "
