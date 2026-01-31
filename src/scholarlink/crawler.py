@@ -16,34 +16,18 @@ from crawl4ai import (
 )
 from crawl4ai.async_crawler_strategy import AsyncPlaywrightCrawlerStrategy
 
-from scholarlink.models import PaperMetadata
+from scholarlink.config import get_config
+from scholarlink.formatters import authors_to_csv
+from scholarlink.models import AuthorInfo, PaperMetadata
 
 # Allowed crawler modes: single source of truth for cli/api/crawler
 CRAWLER_MODES = ("normal", "stealth")
-MODE_HELP = (
-    "normal uses stealth only for protected domains; stealth uses stealth for all URLs"
-)
-
-# Cloudflare-protected domains: use undetected browser + stealth
-DEFAULT_PROTECTED_DOMAINS = frozenset(
-    {
-        "biorxiv.org",
-        "www.biorxiv.org",
-        "pnas.org",
-        "www.pnas.org",
-    }
-)
-
-# Phrases that indicate Cloudflare challenge text leaked into extracted content
-CLOUDFLARE_PHRASES = ("cloudflare", "verifying you are human", "ray id")
+MODE_HELP = "normal uses stealth only for protected domains; stealth uses stealth for all URLs"
 
 
 def _get_protected_domains() -> frozenset[str]:
-    """Return the set of hostnames that use Cloudflare (from env or default)."""
-    env_val = os.getenv("SCHOLARLINK_PROTECTED_DOMAINS")
-    if env_val:
-        return frozenset(d.strip().lower() for d in env_val.split(",") if d.strip())
-    return DEFAULT_PROTECTED_DOMAINS
+    """Return the set of hostnames that use Cloudflare (from config: file or env)."""
+    return get_config().protected_domains_frozenset()
 
 
 def _is_protected_domain(url: str) -> bool:
@@ -58,15 +42,6 @@ def _is_protected_domain(url: str) -> bool:
         return False
 
 
-AUTHORS_EXTRACTION_INSTRUCTION = """
-From this scientific article page, extract all publication authors.
-Return them as a list of full names in order of appearance.
-Do not include affiliations, links, or "View ORCID Profile" text—only author names.
-If the page lists authors in a single comma-separated line, split them into the list.
-Preserve the exact spelling and order of names.
-""".strip()
-
-
 class ExtractionError(Exception):
     """Raised when crawling or author extraction fails."""
 
@@ -74,50 +49,40 @@ class ExtractionError(Exception):
 
 
 def _get_llm_config() -> LLMConfig:
-    provider = os.getenv("SCHOLARLINK_LLM_PROVIDER", "openai/gpt-4o-mini")
+    cfg = get_config()
     api_token = os.getenv("OPENAI_API_KEY")
-    if not api_token and "openai" in provider.lower():
+    if not api_token and "openai" in cfg.llm_provider.lower():
         raise ExtractionError(
             "OPENAI_API_KEY is not set. Set it in the environment to use "
             "LLM-based author extraction."
         )
-    return LLMConfig(provider=provider, api_token=api_token or "")
-
-
-# When cloudflare_manual is True, wait this long for user to complete challenge
-CLOUDFLARE_MANUAL_WAIT_SECONDS = 5
+    return LLMConfig(provider=cfg.llm_provider, api_token=api_token or "")
 
 
 def _is_playwright_browser_error(exc: BaseException) -> bool:
     """Return True if the exception indicates Playwright browser is not installed."""
     err_msg = str(exc)
-    return (
-        "Executable doesn't exist" in err_msg
-        or "playwright" in type(exc).__module__
-    )
+    return "Executable doesn't exist" in err_msg or "playwright" in type(exc).__module__
 
 
-def _get_delay_and_notify(
-    protected: bool, cloudflare_manual: bool
-) -> float:
+def _get_delay_and_notify(protected: bool, cloudflare_manual: bool) -> float:
     """Return delay in seconds; print stderr message if cloudflare_manual and protected."""
-    delay = 0.1
+    cfg = get_config()
+    delay = cfg.delay_default
     if protected:
         if cloudflare_manual:
-            delay = CLOUDFLARE_MANUAL_WAIT_SECONDS
+            delay = float(cfg.cloudflare_manual_wait_seconds)
             print(
                 "A browser window will open. Complete the Cloudflare challenge "
                 f"if shown. Waiting up to {delay} seconds...",
                 file=sys.stderr,
             )
         else:
-            delay = 3.0
+            delay = cfg.delay_protected
     return delay
 
 
-def _build_run_config(
-    extraction_strategy: LLMExtractionStrategy, delay: float
-) -> CrawlerRunConfig:
+def _build_run_config(extraction_strategy: LLMExtractionStrategy, delay: float) -> CrawlerRunConfig:
     """Build CrawlerRunConfig with bypass cache and given strategy/delay."""
     return CrawlerRunConfig(
         cache_mode=CacheMode.BYPASS,
@@ -126,9 +91,7 @@ def _build_run_config(
     )
 
 
-def _build_crawler_kwargs(
-    use_stealth: bool, protected: bool, cloudflare_manual: bool
-) -> dict:
+def _build_crawler_kwargs(use_stealth: bool, protected: bool, cloudflare_manual: bool) -> dict:
     """Build kwargs for AsyncWebCrawler (config and optionally crawler_strategy)."""
     if use_stealth:
         browser_config = BrowserConfig(
@@ -143,9 +106,7 @@ def _build_crawler_kwargs(
     return {"config": BrowserConfig(headless=True)}
 
 
-async def _run_crawl(
-    crawler_kwargs: dict, url: str, run_config: CrawlerRunConfig
-):
+async def _run_crawl(crawler_kwargs: dict, url: str, run_config: CrawlerRunConfig):
     """Run the crawler and return the result; re-raise Playwright errors as ExtractionError."""
     try:
         async with AsyncWebCrawler(**crawler_kwargs) as crawler:
@@ -169,9 +130,7 @@ def _parse_extraction_result(raw: str, url: str) -> PaperMetadata:
     try:
         data = json.loads(raw)
     except json.JSONDecodeError as e:
-        raise ExtractionError(
-            f"Extraction returned invalid JSON from {url}: {e}"
-        ) from e
+        raise ExtractionError(f"Extraction returned invalid JSON from {url}: {e}") from e
     if isinstance(data, list):
         if not data:
             raise ExtractionError(
@@ -196,7 +155,7 @@ async def extract_authors_from_url(
     *,
     mode: str = "normal",
     cloudflare_manual: bool = False,
-) -> tuple[list[str], str]:
+) -> tuple[list[AuthorInfo], str]:
     """
     Crawl a paper URL with Crawl4AI and extract authors using LLM extraction.
 
@@ -208,24 +167,23 @@ async def extract_authors_from_url(
             so the user can complete the Cloudflare challenge manually.
 
     Returns:
-        Tuple of (authors list, comma-separated authors string).
+        Tuple of (list of AuthorInfo, CSV-like string with one line per author).
 
     Raises:
         ExtractionError: If the crawl fails or extracted content is invalid.
     """
     if mode not in CRAWLER_MODES:
-        raise ExtractionError(
-            f"mode must be one of {CRAWLER_MODES!r}, got {mode!r}"
-        )
+        raise ExtractionError(f"mode must be one of {CRAWLER_MODES!r}, got {mode!r}")
+    cfg = get_config()
     llm_config = _get_llm_config()
     extraction_strategy = LLMExtractionStrategy(
         llm_config=llm_config,
         schema=PaperMetadata.model_json_schema(),
         extraction_type="schema",
-        instruction=AUTHORS_EXTRACTION_INSTRUCTION,
+        instruction=cfg.authors_extraction_instruction,
         input_format="markdown",
         apply_chunking=False,
-        extra_args={"temperature": 0.0, "max_tokens": 2000},
+        extra_args={"temperature": cfg.llm_temperature, "max_tokens": cfg.llm_max_tokens},
     )
     protected = _is_protected_domain(url)
     use_stealth = protected or (mode == "stealth")
@@ -241,13 +199,14 @@ async def extract_authors_from_url(
     raw = result.extracted_content or ""
     metadata = _parse_extraction_result(raw, url)
     authors = metadata.authors
-    authors_str = ", ".join(authors) if authors else ""
+    csv_str = authors_to_csv(authors)
     # Reject if Cloudflare challenge text leaked into extracted content
-    combined = (authors_str + " " + raw).lower()
-    if any(phrase in combined for phrase in CLOUDFLARE_PHRASES):
+    names_str = " ".join(a.name for a in authors) if authors else ""
+    combined = (names_str + " " + raw).lower()
+    if any(phrase in combined for phrase in get_config().cloudflare_phrases_tuple()):
         raise ExtractionError(
             f"Extracted content from {url} looks like a Cloudflare challenge page. "
             "Retry or ensure the URL is on a protected domain (undetected browser "
             "is used automatically)."
         )
-    return authors, authors_str
+    return authors, csv_str
