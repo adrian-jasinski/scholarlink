@@ -1,0 +1,39 @@
+# Python
+__pycache__/
+*.py[cod]
+*.so
+.Python
+*.egg-info/
+*.egg
+dist/
+build/
+eggs/
+.eggs/
+
+# Virtual env
+.venv/
+venv/
+ENV/
+
+# Environment
+.env
+.env.local
+
+# Tooling
+.ruff_cache/
+.mypy_cache/
+.pytest_cache/
+htmlcov/
+.coverage
+*.cover
+
+# IDE / OS
+.cursor/
+.idea/
+.vscode/
+*.swp
+.DS_Store
+
+# Optional
+outputs/
+*.log
