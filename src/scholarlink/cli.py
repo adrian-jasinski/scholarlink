@@ -6,10 +6,10 @@ import json
 import typer
 
 from scholarlink.api import extract_authors
-from scholarlink.crawler import ExtractionError
+from scholarlink.crawler import CRAWLER_MODES, ExtractionError, MODE_HELP
 
 app = typer.Typer(
-    help="Extract publication authors from a scientific paper URL using Crawl4AI.",
+    help=("Extract publication authors from a scientific paper URL using Crawl4AI."),
     invoke_without_command=True,
 )
 
@@ -18,16 +18,37 @@ app = typer.Typer(
 def run_cmd(
     url: str = typer.Argument(
         ...,
-        help="URL of the paper (e.g. https://www.biorxiv.org/content/10.1101/2025.08.14.670328v1)",
+        help="URL of the paper (e.g. biorxiv or PNAS article page)",
     ),
     json_output: bool = typer.Option(
         False,
         "--json",
         help='Output authors as JSON: {"authors": [...], "authors_str": "..."}',
     ),
+    mode: str = typer.Option(
+        "normal",
+        "--mode",
+        help=f"Crawler mode: {MODE_HELP}.",
+    ),
+    cloudflare_manual: bool = typer.Option(
+        False,
+        "--cloudflare-manual",
+        help=(
+            "For protected domains: show browser and wait so you can complete "
+            "Cloudflare challenge manually."
+        ),
+    ),
 ) -> None:
+    if mode not in CRAWLER_MODES:
+        typer.echo(
+            f"Error: --mode must be one of {CRAWLER_MODES!r}, got {mode!r}",
+            err=True,
+        )
+        raise typer.Exit(2) from None
     try:
-        authors_list, authors_str = asyncio.run(extract_authors(url))
+        authors_list, authors_str = asyncio.run(
+            extract_authors(url, mode=mode, cloudflare_manual=cloudflare_manual)
+        )
     except ExtractionError as e:
         typer.echo(f"Error: {e}", err=True)
         raise typer.Exit(1) from None

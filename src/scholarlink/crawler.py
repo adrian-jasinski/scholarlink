@@ -2,6 +2,7 @@
 
 import json
 import os
+import sys
 from urllib.parse import urlparse
 
 from crawl4ai import (
@@ -16,6 +17,12 @@ from crawl4ai import (
 from crawl4ai.async_crawler_strategy import AsyncPlaywrightCrawlerStrategy
 
 from scholarlink.models import PaperMetadata
+
+# Allowed crawler modes: single source of truth for cli/api/crawler
+CRAWLER_MODES = ("normal", "stealth")
+MODE_HELP = (
+    "normal uses stealth only for protected domains; stealth uses stealth for all URLs"
+)
 
 # Cloudflare-protected domains: use undetected browser + stealth
 DEFAULT_PROTECTED_DOMAINS = frozenset(
@@ -77,75 +84,94 @@ def _get_llm_config() -> LLMConfig:
     return LLMConfig(provider=provider, api_token=api_token or "")
 
 
-async def extract_authors_from_url(url: str) -> tuple[list[str], str]:
-    """
-    Crawl a paper URL with Crawl4AI and extract authors using LLM extraction.
+# When cloudflare_manual is True, wait this long for user to complete challenge
+CLOUDFLARE_MANUAL_WAIT_SECONDS = 5
 
-    Returns:
-        Tuple of (authors list, comma-separated authors string).
 
-    Raises:
-        ExtractionError: If the crawl fails or extracted content is invalid.
-    """
-    llm_config = _get_llm_config()
-    extraction_strategy = LLMExtractionStrategy(
-        llm_config=llm_config,
-        schema=PaperMetadata.model_json_schema(),
-        extraction_type="schema",
-        instruction=AUTHORS_EXTRACTION_INSTRUCTION,
-        input_format="markdown",
-        apply_chunking=False,
-        extra_args={"temperature": 0.0, "max_tokens": 2000},
+def _is_playwright_browser_error(exc: BaseException) -> bool:
+    """Return True if the exception indicates Playwright browser is not installed."""
+    err_msg = str(exc)
+    return (
+        "Executable doesn't exist" in err_msg
+        or "playwright" in type(exc).__module__
     )
-    protected = _is_protected_domain(url)
-    run_config = CrawlerRunConfig(
+
+
+def _get_delay_and_notify(
+    protected: bool, cloudflare_manual: bool
+) -> float:
+    """Return delay in seconds; print stderr message if cloudflare_manual and protected."""
+    delay = 0.1
+    if protected:
+        if cloudflare_manual:
+            delay = CLOUDFLARE_MANUAL_WAIT_SECONDS
+            print(
+                "A browser window will open. Complete the Cloudflare challenge "
+                f"if shown. Waiting up to {delay} seconds...",
+                file=sys.stderr,
+            )
+        else:
+            delay = 3.0
+    return delay
+
+
+def _build_run_config(
+    extraction_strategy: LLMExtractionStrategy, delay: float
+) -> CrawlerRunConfig:
+    """Build CrawlerRunConfig with bypass cache and given strategy/delay."""
+    return CrawlerRunConfig(
         cache_mode=CacheMode.BYPASS,
         extraction_strategy=extraction_strategy,
-        delay_before_return_html=3.0 if protected else 0.1,
+        delay_before_return_html=delay,
     )
-    if protected:
+
+
+def _build_crawler_kwargs(
+    use_stealth: bool, protected: bool, cloudflare_manual: bool
+) -> dict:
+    """Build kwargs for AsyncWebCrawler (config and optionally crawler_strategy)."""
+    if use_stealth:
         browser_config = BrowserConfig(
             enable_stealth=True,
-            headless=False,
+            headless=False if (protected and cloudflare_manual) else True,
         )
         crawler_strategy = AsyncPlaywrightCrawlerStrategy(
             browser_config=browser_config,
             browser_adapter=UndetectedAdapter(),
         )
-        crawler_kwargs = {"crawler_strategy": crawler_strategy, "config": browser_config}
-    else:
-        browser_config = BrowserConfig(headless=True)
-        crawler_kwargs = {"config": browser_config}
+        return {"crawler_strategy": crawler_strategy, "config": browser_config}
+    return {"config": BrowserConfig(headless=True)}
 
+
+async def _run_crawl(
+    crawler_kwargs: dict, url: str, run_config: CrawlerRunConfig
+):
+    """Run the crawler and return the result; re-raise Playwright errors as ExtractionError."""
     try:
         async with AsyncWebCrawler(**crawler_kwargs) as crawler:
-            result = await crawler.arun(url=url, config=run_config)
+            return await crawler.arun(url=url, config=run_config)
     except Exception as e:  # noqa: BLE001
-        err_msg = str(e)
-        if "Executable doesn't exist" in err_msg or "playwright" in type(e).__module__:
+        if _is_playwright_browser_error(e):
             raise ExtractionError(
                 "Playwright browser is not installed. Run:\n"
                 "  uv run python -m playwright install chromium"
             ) from e
         raise
 
-    if not result.success:
-        msg = result.error_message or "Crawl failed"
-        raise ExtractionError(f"Crawl failed for {url}: {msg}")
 
-    raw = result.extracted_content
+def _parse_extraction_result(raw: str, url: str) -> PaperMetadata:
+    """Parse raw JSON from LLM extraction into PaperMetadata; raise ExtractionError on failure."""
     if not raw or not raw.strip():
         raise ExtractionError(
             f"No content was extracted from {url}. The page may be empty or "
             "the LLM returned nothing."
         )
-
     try:
         data = json.loads(raw)
     except json.JSONDecodeError as e:
-        raise ExtractionError(f"Extraction returned invalid JSON from {url}: {e}") from e
-
-    # LLM may return a list (e.g. [{"authors": [...]}] or []) instead of a single object
+        raise ExtractionError(
+            f"Extraction returned invalid JSON from {url}: {e}"
+        ) from e
     if isinstance(data, list):
         if not data:
             raise ExtractionError(
@@ -157,14 +183,63 @@ async def extract_authors_from_url(url: str) -> tuple[list[str], str]:
             f"Extraction returned unexpected type from {url}: expected dict, "
             f"got {type(data).__name__}"
         )
-
     try:
-        metadata = PaperMetadata.model_validate(data)
+        return PaperMetadata.model_validate(data)
     except Exception as e:
         raise ExtractionError(
             f"Extracted data did not match expected schema from {url}: {e}"
         ) from e
 
+
+async def extract_authors_from_url(
+    url: str,
+    *,
+    mode: str = "normal",
+    cloudflare_manual: bool = False,
+) -> tuple[list[str], str]:
+    """
+    Crawl a paper URL with Crawl4AI and extract authors using LLM extraction.
+
+    Args:
+        url: Paper URL to crawl.
+        mode: "normal" uses stealth only for protected domains; "stealth" uses
+            stealth for all URLs.
+        cloudflare_manual: If True and URL is protected, show browser and wait
+            so the user can complete the Cloudflare challenge manually.
+
+    Returns:
+        Tuple of (authors list, comma-separated authors string).
+
+    Raises:
+        ExtractionError: If the crawl fails or extracted content is invalid.
+    """
+    if mode not in CRAWLER_MODES:
+        raise ExtractionError(
+            f"mode must be one of {CRAWLER_MODES!r}, got {mode!r}"
+        )
+    llm_config = _get_llm_config()
+    extraction_strategy = LLMExtractionStrategy(
+        llm_config=llm_config,
+        schema=PaperMetadata.model_json_schema(),
+        extraction_type="schema",
+        instruction=AUTHORS_EXTRACTION_INSTRUCTION,
+        input_format="markdown",
+        apply_chunking=False,
+        extra_args={"temperature": 0.0, "max_tokens": 2000},
+    )
+    protected = _is_protected_domain(url)
+    use_stealth = protected or (mode == "stealth")
+    delay = _get_delay_and_notify(protected, cloudflare_manual)
+    run_config = _build_run_config(extraction_strategy, delay)
+    crawler_kwargs = _build_crawler_kwargs(use_stealth, protected, cloudflare_manual)
+
+    result = await _run_crawl(crawler_kwargs, url, run_config)
+    if not result.success:
+        msg = result.error_message or "Crawl failed"
+        raise ExtractionError(f"Crawl failed for {url}: {msg}")
+
+    raw = result.extracted_content or ""
+    metadata = _parse_extraction_result(raw, url)
     authors = metadata.authors
     authors_str = ", ".join(authors) if authors else ""
     # Reject if Cloudflare challenge text leaked into extracted content
