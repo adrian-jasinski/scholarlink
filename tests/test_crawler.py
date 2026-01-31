@@ -4,8 +4,8 @@ import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-
 from crawl4ai import CacheMode, LLMExtractionStrategy
+
 from scholarlink.crawler import (
     CLOUDFLARE_MANUAL_WAIT_SECONDS,
     DEFAULT_PROTECTED_DOMAINS,
@@ -65,18 +65,44 @@ def test_is_protected_domain_uses_custom_env(monkeypatch: pytest.MonkeyPatch) ->
     assert _is_protected_domain("https://www.biorxiv.org/foo") is False
 
 
+def _author_dict(
+    name: str,
+    affiliation: str = "",
+    contact: str = "",
+    orcid: str = "",
+    other: str = "",
+) -> dict:
+    return {
+        "name": name,
+        "affiliation": affiliation,
+        "contact": contact,
+        "orcid": orcid,
+        "other": other,
+    }
+
+
 def test_parse_extraction_result_valid_dict() -> None:
-    """Valid JSON dict with authors returns PaperMetadata."""
-    raw = json.dumps({"authors": ["A", "B"]})
+    """Valid JSON dict with authors (list of AuthorInfo) returns PaperMetadata."""
+    raw = json.dumps(
+        {
+            "authors": [
+                _author_dict("Alice", "MIT", "a@b.com", "0000-0001-2345-6789", ""),
+                _author_dict("Bob", "Stanford", "", "", ""),
+            ]
+        }
+    )
     meta = _parse_extraction_result(raw, "https://example.com/paper")
-    assert meta.authors == ["A", "B"]
+    assert len(meta.authors) == 2
+    assert meta.authors[0].name == "Alice" and meta.authors[0].affiliation == "MIT"
+    assert meta.authors[1].name == "Bob" and meta.authors[1].affiliation == "Stanford"
 
 
 def test_parse_extraction_result_list_wrapper() -> None:
     """JSON list with single dict unwraps to PaperMetadata."""
-    raw = json.dumps([{"authors": ["A"]}])
+    raw = json.dumps([{"authors": [_author_dict("A")]}])
     meta = _parse_extraction_result(raw, "https://example.com/paper")
-    assert meta.authors == ["A"]
+    assert len(meta.authors) == 1
+    assert meta.authors[0].name == "A"
 
 
 def test_parse_extraction_result_empty_string_raises() -> None:
@@ -100,6 +126,13 @@ def test_parse_extraction_result_wrong_type_raises() -> None:
         _parse_extraction_result(raw, "https://example.com/paper")
 
 
+def test_parse_extraction_result_authors_plain_strings_raises() -> None:
+    """Authors as list of plain strings (old shape) raises ExtractionError."""
+    raw = json.dumps({"authors": ["Alice", "Bob"]})
+    with pytest.raises(ExtractionError, match="expected schema"):
+        _parse_extraction_result(raw, "https://example.com/paper")
+
+
 def test_parse_extraction_result_empty_list_raises() -> None:
     """JSON empty list raises ExtractionError."""
     with pytest.raises(ExtractionError, match="empty list"):
@@ -114,6 +147,7 @@ def test_is_playwright_browser_error_executable_missing() -> None:
 
 def test_is_playwright_browser_error_playwright_module() -> None:
     """Exception from playwright module returns True."""
+
     class FakePlaywrightError(Exception):
         pass
 
@@ -191,10 +225,17 @@ def test_build_crawler_kwargs_stealth_cloudflare_manual() -> None:
 
 @pytest.mark.asyncio
 async def test_extract_authors_from_url_success() -> None:
-    """extract_authors_from_url returns authors when crawl returns valid JSON."""
+    """extract_authors_from_url returns (authors, csv_str) when crawl returns valid JSON."""
     mock_result = MagicMock()
     mock_result.success = True
-    mock_result.extracted_content = json.dumps({"authors": ["Alice", "Bob"]})
+    mock_result.extracted_content = json.dumps(
+        {
+            "authors": [
+                _author_dict("Alice", "MIT", "a@b.com", "", ""),
+                _author_dict("Bob", "Stanford", "", "0000-0002-3456-7890", ""),
+            ]
+        }
+    )
     mock_result.error_message = None
 
     with (
@@ -205,11 +246,16 @@ async def test_extract_authors_from_url_success() -> None:
             return_value=mock_result,
         ),
     ):
-        authors, authors_str = await extract_authors_from_url(
+        authors, csv_str = await extract_authors_from_url(
             "https://example.com/paper", mode="normal"
         )
-    assert authors == ["Alice", "Bob"]
-    assert authors_str == "Alice, Bob"
+    assert len(authors) == 2
+    assert authors[0].name == "Alice" and authors[0].affiliation == "MIT"
+    assert authors[1].name == "Bob" and authors[1].orcid == "0000-0002-3456-7890"
+    assert "name,affiliation,contact,orcid,other" in csv_str
+    lines = csv_str.splitlines()
+    assert len(lines) == 3  # header + 2 authors
+    assert "Alice" in lines[1] and "Bob" in lines[2]
 
 
 @pytest.mark.asyncio
@@ -261,10 +307,12 @@ async def test_extract_authors_from_url_empty_content_raises() -> None:
 @pytest.mark.asyncio
 async def test_extract_authors_from_url_cloudflare_phrase_raises() -> None:
     """When extracted content contains Cloudflare phrase, raises ExtractionError."""
-    # Use valid JSON; "cloudflare" in authors makes combined string trigger the check
+    # Use valid JSON; author name "cloudflare" makes combined string trigger the check
     mock_result = MagicMock()
     mock_result.success = True
-    mock_result.extracted_content = json.dumps({"authors": ["Alice", "cloudflare"]})
+    mock_result.extracted_content = json.dumps(
+        {"authors": [_author_dict("Alice"), _author_dict("cloudflare")]}
+    )
     mock_result.error_message = None
 
     with (

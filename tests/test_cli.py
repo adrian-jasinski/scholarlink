@@ -7,25 +7,39 @@ import typer.testing
 
 from scholarlink.cli import app
 from scholarlink.crawler import ExtractionError
+from scholarlink.models import AuthorInfo
 
 
-def test_cli_invoke_success_stdout_authors() -> None:
-    """Invoke with URL returns exit 0 and stdout contains authors string."""
+def _csv_two_authors() -> str:
+    return (
+        "name,affiliation,contact,orcid,other\n"
+        "Alice,MIT,a@b.com,,\nBob,Stanford,,0000-0002-3456-7890,"
+    )
+
+
+def test_cli_invoke_success_stdout_csv() -> None:
+    """Invoke with URL returns exit 0 and stdout is CSV (header + one line per author)."""
+    authors = [
+        AuthorInfo(name="Alice", affiliation="MIT", contact="a@b.com"),
+        AuthorInfo(name="Bob", affiliation="Stanford", orcid="0000-0002-3456-7890"),
+    ]
+    csv_str = _csv_two_authors()
+
     with patch(
         "scholarlink.cli.extract_authors",
         new_callable=AsyncMock,
-        return_value=(["Alice", "Bob"], "Alice, Bob"),
+        return_value=(authors, csv_str),
     ):
         runner = typer.testing.CliRunner()
         result = runner.invoke(app, ["https://example.com/paper"])
     assert result.exit_code == 0
-    assert "Alice, Bob" in result.stdout
+    assert "name,affiliation,contact,orcid,other" in result.stdout
+    assert "Alice" in result.stdout and "Bob" in result.stdout
 
 
 def test_cli_invoke_invalid_mode_exit_2() -> None:
     """--mode invalid returns exit 2 and stderr mentions mode."""
     runner = typer.testing.CliRunner()
-    # Pass URL as first positional; use --mode=invalid so "invalid" is not parsed as a command
     result = runner.invoke(app, ["--mode=invalid", "https://example.com/paper"])
     assert result.exit_code == 2
     assert "mode" in result.stderr.lower()
@@ -45,18 +59,29 @@ def test_cli_extraction_error_exit_1() -> None:
 
 
 def test_cli_json_output() -> None:
-    """--json returns exit 0 and valid JSON with authors and authors_str."""
+    """--json returns exit 0 and valid JSON with authors (list of objects) and csv."""
+    authors = [AuthorInfo(name="Alice", affiliation="MIT")]
+    csv_str = "name,affiliation,contact,orcid,other\nAlice,MIT,,,"
+
     with patch(
         "scholarlink.cli.extract_authors",
         new_callable=AsyncMock,
-        return_value=(["Alice"], "Alice"),
+        return_value=(authors, csv_str),
     ):
         runner = typer.testing.CliRunner()
-        # Pass URL first so it is not consumed by --json
         result = runner.invoke(app, ["--json", "https://example.com/paper"])
     assert result.exit_code == 0
     data = json.loads(result.stdout)
     assert "authors" in data
-    assert "authors_str" in data
-    assert data["authors"] == ["Alice"]
-    assert data["authors_str"] == "Alice"
+    assert "csv" in data
+    expected = [
+        {
+            "name": "Alice",
+            "affiliation": "MIT",
+            "contact": None,
+            "orcid": None,
+            "other": None,
+        }
+    ]
+    assert data["authors"] == expected
+    assert data["csv"] == csv_str
