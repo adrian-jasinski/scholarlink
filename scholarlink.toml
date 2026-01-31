@@ -1,0 +1,33 @@
+# Example Scholarlink config (TOML).
+# Copy to scholarlink.toml or set SCHOLARLINK_CONFIG to this path.
+# Environment variables override values set here.
+# Do not put secrets (e.g. OPENAI_API_KEY) in this file; use .env.
+
+[scholarlink]
+
+# Seconds to wait when --cloudflare-manual is used and user completes
+# the Cloudflare challenge in the browser.
+cloudflare_manual_wait_seconds = 12
+
+# Crawl delay in seconds when not on a protected domain.
+# delay_default = 0.1
+
+# Crawl delay in seconds when on a protected domain (without manual Cloudflare).
+# delay_protected = 3.0
+
+# Default Cloudflare-protected hostnames (undetected browser + stealth).
+# Override with SCHOLARLINK_PROTECTED_DOMAINS env (comma-separated).
+protected_domains = ["biorxiv.org", "www.biorxiv.org"]
+
+# Phrases that indicate Cloudflare challenge text leaked into extracted content.
+# cloudflare_phrases = ["cloudflare", "verifying you are human", "ray id"]
+
+# LLM instruction for author extraction. Long text is easier to edit here than in .env.
+# authors_extraction_instruction = """..."""
+
+# LLM generation parameters.
+# llm_temperature = 0.0
+# llm_max_tokens = 2000
+
+# LLM provider string (e.g. openai/gpt-4o-mini). Override with SCHOLARLINK_LLM_PROVIDER.
+# llm_provider = "openai/gpt-4o-mini"
