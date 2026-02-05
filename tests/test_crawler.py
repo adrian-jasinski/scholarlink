@@ -11,14 +11,17 @@ from scholarlink.crawler import (
     ExtractionError,
     _build_crawler_kwargs,
     _build_run_config,
+    _extract_author_names_only,
+    _fallback_author_names_from_markdown,
     _get_delay_and_notify,
+    _get_markdown_text,
     _get_protected_domains,
     _is_playwright_browser_error,
     _is_protected_domain,
     _parse_extraction_result,
     extract_authors_from_url,
 )
-from scholarlink.models import PaperMetadata
+from scholarlink.models import AuthorInfo, PaperMetadata
 
 
 def test_is_protected_domain_biorxiv_true() -> None:
@@ -157,10 +160,109 @@ def test_parse_extraction_result_authors_plain_strings_raises() -> None:
         _parse_extraction_result(raw, "https://example.com/paper")
 
 
-def test_parse_extraction_result_empty_list_raises() -> None:
-    """JSON empty list raises ExtractionError."""
-    with pytest.raises(ExtractionError, match="empty list"):
-        _parse_extraction_result("[]", "https://example.com/paper")
+def test_parse_extraction_result_empty_list_returns_none() -> None:
+    """JSON empty list returns None (caller may try fallback)."""
+    meta = _parse_extraction_result("[]", "https://example.com/paper")
+    assert meta is None
+
+
+def test_get_markdown_text_none_when_missing() -> None:
+    """When result has no markdown, returns None."""
+    result = MagicMock(spec=[])
+    assert _get_markdown_text(result) is None
+
+
+def test_get_markdown_text_string() -> None:
+    """When result.markdown is a string, returns it."""
+    result = MagicMock()
+    result.markdown = "## Title\n\nSome text."
+    assert _get_markdown_text(result) == "## Title\n\nSome text."
+
+
+def test_get_markdown_text_raw_markdown_object() -> None:
+    """When result.markdown has raw_markdown, returns that."""
+    result = MagicMock()
+    result.markdown = MagicMock()
+    result.markdown.raw_markdown = "# Paper\n\nAuthors: A, B"
+    result.markdown.fit_markdown = None
+    assert _get_markdown_text(result) == "# Paper\n\nAuthors: A, B"
+
+
+def test_fallback_author_names_from_markdown_empty() -> None:
+    """Empty or no author block returns empty list."""
+    assert _fallback_author_names_from_markdown("") == []
+    assert _fallback_author_names_from_markdown("Just abstract text.") == []
+
+
+def test_fallback_author_names_from_markdown_after_authors_label() -> None:
+    """Authors listed after 'Authors:' are parsed as name-only AuthorInfo."""
+    text = "Title\n\nAuthors: Alice Foo, Bob Bar, Carol Baz.\n\nAbstract\n\n..."
+    authors = _fallback_author_names_from_markdown(text)
+    assert len(authors) >= 2
+    names = [a.name for a in authors]
+    assert "Alice Foo" in names
+    assert "Bob Bar" in names
+    for a in authors:
+        assert a.affiliation is None
+        assert a.contact is None
+        assert a.orcid is None
+
+
+@pytest.mark.asyncio
+async def test_extract_author_names_only_returns_name_only_authors() -> None:
+    """Second-attempt LLM (names-only) returns AuthorInfo with name set only."""
+    with patch("scholarlink.crawler._get_llm_config"), patch(
+        "scholarlink.crawler.LLMExtractionStrategy"
+    ) as mock_strategy_cls:
+        mock_strategy = MagicMock()
+        mock_strategy.arun = AsyncMock(
+            return_value=[{"authors": ["Alpha One", "Beta Two"], "error": False}]
+        )
+        mock_strategy_cls.return_value = mock_strategy
+        authors = await _extract_author_names_only(
+            "# Paper\n\nSome text.", "https://example.com/paper"
+        )
+    assert len(authors) == 2
+    assert authors[0].name == "Alpha One"
+    assert authors[1].name == "Beta Two"
+    for a in authors:
+        assert a.affiliation is None and a.contact is None and a.orcid is None
+
+
+@pytest.mark.asyncio
+async def test_extract_authors_from_url_empty_list_second_attempt_used() -> None:
+    """When first attempt returns [], second attempt (names-only) on same data is used."""
+    mock_result = MagicMock()
+    mock_result.success = True
+    mock_result.extracted_content = "[]"
+    mock_result.error_message = None
+    mock_result.markdown = MagicMock()
+    mock_result.markdown.raw_markdown = "# Title\n\nBody..."
+    mock_result.markdown.fit_markdown = None
+    second_attempt_authors = [
+        AuthorInfo(name="Second One", affiliation=None, contact=None, orcid=None, other=None),
+        AuthorInfo(name="Second Two", affiliation=None, contact=None, orcid=None, other=None),
+    ]
+
+    with (
+        patch("scholarlink.crawler._get_llm_config"),
+        patch(
+            "scholarlink.crawler._run_crawl",
+            new_callable=AsyncMock,
+            return_value=mock_result,
+        ),
+        patch(
+            "scholarlink.crawler._extract_author_names_only",
+            new_callable=AsyncMock,
+            return_value=second_attempt_authors,
+        ),
+    ):
+        authors, csv_str = await extract_authors_from_url(
+            "https://example.com/paper", mode="normal"
+        )
+    assert authors == second_attempt_authors
+    assert "name,affiliation,contact,orcid,other" in csv_str
+    assert "Second One" in csv_str and "Second Two" in csv_str
 
 
 def test_is_playwright_browser_error_executable_missing() -> None:
@@ -327,6 +429,41 @@ async def test_extract_authors_from_url_empty_content_raises() -> None:
     ):
         with pytest.raises(ExtractionError, match="No content was extracted"):
             await extract_authors_from_url("https://example.com/paper")
+
+
+@pytest.mark.asyncio
+async def test_extract_authors_from_url_empty_list_uses_fallback() -> None:
+    """When LLM returns empty list, fallback from markdown returns name-only CSV rows."""
+    mock_result = MagicMock()
+    mock_result.success = True
+    mock_result.extracted_content = "[]"
+    mock_result.error_message = None
+    mock_result.markdown = MagicMock()
+    mock_result.markdown.raw_markdown = (
+        "# Paper title\n\nAuthors: Jane Doe, John Smith.\n\nAbstract\n\n..."
+    )
+    mock_result.markdown.fit_markdown = None
+
+    with (
+        patch("scholarlink.crawler._get_llm_config"),
+        patch(
+            "scholarlink.crawler._run_crawl",
+            new_callable=AsyncMock,
+            return_value=mock_result,
+        ),
+    ):
+        authors, csv_str = await extract_authors_from_url(
+            "https://example.com/paper", mode="normal"
+        )
+    assert len(authors) >= 2
+    names = [a.name for a in authors]
+    assert "Jane Doe" in names
+    assert "John Smith" in names
+    for a in authors:
+        assert a.affiliation is None and a.contact is None and a.orcid is None
+    assert "name,affiliation,contact,orcid,other" in csv_str
+    lines = csv_str.splitlines()
+    assert len(lines) >= 3  # header + at least 2 authors
 
 
 @pytest.mark.asyncio
