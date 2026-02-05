@@ -32,9 +32,9 @@
 # LLM provider string (e.g. openai/gpt-4o-mini). Override with SCHOLARLINK_LLM_PROVIDER.
 # llm_provider = "openai/gpt-4o-mini"
 
-# LinkedIn profile lookup: search backend (serper or tavily). Set SERPER_API_KEY or
-# TAVILY_API_KEY in the environment. Override with SCHOLARLINK_SEARCH_PROVIDER.
-# search_provider = "serper"
+# LinkedIn profile lookup: search backend (duckduckgo = free, no API key).
+# Override with SCHOLARLINK_SEARCH_PROVIDER.
+# search_provider = "duckduckgo"
 
 # Max search results per author passed to LLM for LinkedIn lookup. Override with
 # SCHOLARLINK_SEARCH_MAX_RESULTS.

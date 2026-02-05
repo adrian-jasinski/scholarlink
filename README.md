@@ -36,7 +36,7 @@ OPENAI_API_KEY=sk-...
 - **`SCHOLARLINK_LLM_TEMPERATURE`** (optional): LLM temperature (default: 0.0).
 - **`SCHOLARLINK_LLM_MAX_TOKENS`** (optional): LLM max tokens (default: 2000).
 - **`SCHOLARLINK_CONFIG`** (optional): Path to a TOML config file. If unset, Scholarlink looks for `scholarlink.toml` in the current working directory.
-- **LinkedIn lookup** (for `scholarlink linkedin`): **`SERPER_API_KEY`** (for Serper) or **`TAVILY_API_KEY`** (for Tavily). **`SCHOLARLINK_SEARCH_PROVIDER`** (optional): `serper` (default) or `tavily`. **`SCHOLARLINK_SEARCH_MAX_RESULTS`** (optional): max search results per author (default: 10).
+- **LinkedIn lookup** (for `--linkedin`): uses **DuckDuckGo** search (free, no API key). **`SCHOLARLINK_SEARCH_PROVIDER`** (optional): `duckduckgo` (default). **`SCHOLARLINK_SEARCH_MAX_RESULTS`** (optional): max search results per author (default: 10).
 
 **Optional config file**
 
@@ -53,7 +53,7 @@ uv run scholarlink "https://www.biorxiv.org/content/10.1101/2025.08.14.670328v1"
 # Output JSON: {"authors": [...], "authors_str": "..."}
 uv run scholarlink "https://www.biorxiv.org/content/10.1101/2025.08.14.670328v1" --json
 
-# Extract authors then find LinkedIn profiles (requires SERPER_API_KEY or TAVILY_API_KEY and OPENAI_API_KEY)
+# Extract authors then find LinkedIn profiles (free DuckDuckGo search; requires OPENAI_API_KEY for LLM)
 uv run scholarlink --linkedin "https://www.biorxiv.org/content/10.1101/2025.08.14.670328v1"
 uv run scholarlink --linkedin --json "https://..."
 ```

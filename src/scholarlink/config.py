@@ -57,8 +57,8 @@ class ScholarlinkConfig(BaseModel):
         description="LLM provider string (e.g. openai/gpt-4o-mini).",
     )
     search_provider: str = Field(
-        default="serper",
-        description="Search backend for LinkedIn lookup: 'serper' or 'tavily'.",
+        default="duckduckgo",
+        description="Search backend for LinkedIn lookup: 'duckduckgo' (free, no API key).",
     )
     search_max_results: int = Field(
         default=10,
