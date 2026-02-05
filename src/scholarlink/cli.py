@@ -6,7 +6,7 @@ import os
 
 import typer
 
-from scholarlink.api import extract_authors
+from scholarlink.api import extract_authors, find_linkedin_profiles
 from scholarlink.config import reset_config
 from scholarlink.crawler import CRAWLER_MODES, MODE_HELP, ExtractionError
 
@@ -14,7 +14,6 @@ app = typer.Typer(
     help=("Extract publication authors from a scientific paper URL using Crawl4AI."),
     invoke_without_command=True,
 )
-
 
 @app.callback()
 def run_cmd(
@@ -25,7 +24,12 @@ def run_cmd(
     json_output: bool = typer.Option(
         False,
         "--json",
-        help='Output authors as JSON: {"authors": [...], "csv": "..."}',
+        help='Output authors as JSON: {"authors": [...], "csv": "..."}; with --linkedin output LinkedIn results as JSON',
+    ),
+    linkedin: bool = typer.Option(
+        False,
+        "--linkedin",
+        help="After extracting authors, find LinkedIn profile(s) per author (requires SERPER_API_KEY or TAVILY_API_KEY)",
     ),
     mode: str = typer.Option(
         "normal",
@@ -63,11 +67,35 @@ def run_cmd(
         typer.echo(f"Error: {e}", err=True)
         raise typer.Exit(1) from None
 
-    if json_output:
-        authors_data = [a.model_dump() for a in authors_list]
-        typer.echo(json.dumps({"authors": authors_data, "csv": csv_str}))
+    if linkedin:
+        if not authors_list:
+            typer.echo("No authors extracted.", err=True)
+            raise typer.Exit(0) from None
+        try:
+            results = asyncio.run(find_linkedin_profiles(authors_list))
+        except ValueError as e:
+            typer.echo(f"Error: {e}", err=True)
+            raise typer.Exit(1) from None
+        if json_output:
+            out = [
+                {
+                    "author": r.author.model_dump(),
+                    "status": r.status,
+                    "url": r.url,
+                    "urls": r.urls,
+                }
+                for r in results
+            ]
+            typer.echo(json.dumps(out))
+        else:
+            for r in results:
+                typer.echo(f"{r.author.name}\t{r.status}\t{r.url or ''}\t{','.join(r.urls)}")
     else:
-        typer.echo(csv_str)
+        if json_output:
+            authors_data = [a.model_dump() for a in authors_list]
+            typer.echo(json.dumps({"authors": authors_data, "csv": csv_str}))
+        else:
+            typer.echo(csv_str)
 
 
 def main() -> None:

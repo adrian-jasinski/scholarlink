@@ -56,6 +56,16 @@ class ScholarlinkConfig(BaseModel):
         default="openai/gpt-4o-mini",
         description="LLM provider string (e.g. openai/gpt-4o-mini).",
     )
+    search_provider: str = Field(
+        default="serper",
+        description="Search backend for LinkedIn lookup: 'serper' or 'tavily'.",
+    )
+    search_max_results: int = Field(
+        default=10,
+        ge=1,
+        le=20,
+        description="Max number of search results to pass to LLM per author.",
+    )
 
     def protected_domains_frozenset(self) -> frozenset[str]:
         """Return protected_domains as a frozenset (lowercased)."""
@@ -105,6 +115,8 @@ def _load_toml_overrides() -> dict:
         "llm_temperature",
         "llm_max_tokens",
         "llm_provider",
+        "search_provider",
+        "search_max_results",
     }
     return {k: v for k, v in data.items() if k in allowed}
 
@@ -151,6 +163,15 @@ def _env_overrides() -> dict:
     if env_val is not None:
         try:
             overrides["llm_max_tokens"] = int(env_val)
+        except ValueError:
+            pass
+    env_val = os.getenv("SCHOLARLINK_SEARCH_PROVIDER")
+    if env_val is not None:
+        overrides["search_provider"] = env_val
+    env_val = os.getenv("SCHOLARLINK_SEARCH_MAX_RESULTS")
+    if env_val is not None:
+        try:
+            overrides["search_max_results"] = int(env_val)
         except ValueError:
             pass
     return overrides

@@ -85,3 +85,65 @@ def test_cli_json_output() -> None:
     ]
     assert data["authors"] == expected
     assert data["csv"] == csv_str
+
+
+def test_cli_linkedin_flag_success() -> None:
+    """--linkedin runs extract then find_linkedin_profiles and prints tab-separated."""
+    from scholarlink.models import LinkedInLookupResult
+
+    authors = [AuthorInfo(name="Alice")]
+    lookup_results = [
+        LinkedInLookupResult(
+            author=authors[0],
+            status="found",
+            url="https://linkedin.com/in/alice",
+            urls=[],
+        )
+    ]
+    with patch(
+        "scholarlink.cli.extract_authors",
+        new_callable=AsyncMock,
+        return_value=(authors, "name,affiliation,contact,orcid,other\nAlice,,,,"),
+    ), patch(
+        "scholarlink.cli.find_linkedin_profiles",
+        new_callable=AsyncMock,
+        return_value=lookup_results,
+    ):
+        runner = typer.testing.CliRunner()
+        result = runner.invoke(app, ["--linkedin", "https://example.com/paper"])
+    assert result.exit_code == 0
+    assert "Alice" in result.stdout
+    assert "found" in result.stdout
+    assert "linkedin.com/in/alice" in result.stdout
+
+
+def test_cli_linkedin_flag_json() -> None:
+    """--linkedin --json outputs JSON array of lookup results."""
+    from scholarlink.models import LinkedInLookupResult
+
+    authors = [AuthorInfo(name="Bob")]
+    lookup_results = [
+        LinkedInLookupResult(
+            author=authors[0],
+            status="ambiguous",
+            url=None,
+            urls=["https://linkedin.com/in/bob1"],
+        )
+    ]
+    with patch(
+        "scholarlink.cli.extract_authors",
+        new_callable=AsyncMock,
+        return_value=(authors, "csv"),
+    ), patch(
+        "scholarlink.cli.find_linkedin_profiles",
+        new_callable=AsyncMock,
+        return_value=lookup_results,
+    ):
+        runner = typer.testing.CliRunner()
+        result = runner.invoke(app, ["--linkedin", "--json", "https://example.com/paper"])
+    assert result.exit_code == 0
+    data = json.loads(result.stdout)
+    assert isinstance(data, list)
+    assert len(data) == 1
+    assert data[0]["status"] == "ambiguous"
+    assert data[0]["urls"] == ["https://linkedin.com/in/bob1"]

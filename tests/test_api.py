@@ -4,7 +4,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from scholarlink.api import extract_authors
+from scholarlink.api import extract_authors, find_linkedin_profiles
 from scholarlink.models import AuthorInfo
 
 
@@ -45,3 +45,29 @@ async def test_extract_authors_forwards_mode_and_cloudflare_manual() -> None:
             mode="stealth",
             cloudflare_manual=True,
         )
+
+
+@pytest.mark.asyncio
+async def test_find_linkedin_profiles_returns_results() -> None:
+    """find_linkedin_profiles returns list of LinkedInLookupResult from search_linkedin_profiles."""
+    from scholarlink.models import LinkedInLookupResult
+
+    authors = [AuthorInfo(name="Jane")]
+    expected = [
+        LinkedInLookupResult(
+            author=authors[0],
+            status="found",
+            url="https://linkedin.com/in/jane",
+            urls=[],
+        )
+    ]
+    with patch(
+        "scholarlink.api.search_linkedin_profiles",
+        new_callable=AsyncMock,
+        return_value=expected,
+    ):
+        result = await find_linkedin_profiles(authors)
+    assert result == expected
+    assert len(result) == 1
+    assert result[0].status == "found"
+    assert result[0].url == "https://linkedin.com/in/jane"

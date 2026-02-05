@@ -3,7 +3,13 @@
 import pytest
 from pydantic import ValidationError
 
-from scholarlink.models import AuthorInfo, PaperMetadata
+from scholarlink.models import (
+    AuthorInfo,
+    LinkedInLookupResult,
+    LinkedInReviewResult,
+    PaperMetadata,
+    SearchResult,
+)
 
 # --- AuthorInfo ---
 
@@ -107,3 +113,92 @@ def test_paper_metadata_authors_item_missing_name_raises() -> None:
     """authors list item without name raises ValidationError."""
     with pytest.raises(ValidationError):
         PaperMetadata.model_validate({"authors": [{"affiliation": "MIT"}]})
+
+
+# --- SearchResult ---
+
+
+def test_search_result_minimal() -> None:
+    """SearchResult with title and url is valid."""
+    r = SearchResult(title="Foo", url="https://example.com")
+    assert r.title == "Foo"
+    assert r.snippet == ""
+    assert r.url == "https://example.com"
+
+
+def test_search_result_all_fields() -> None:
+    """SearchResult with snippet is valid."""
+    r = SearchResult(
+        title="LinkedIn - John Doe",
+        snippet="Profile page",
+        url="https://linkedin.com/in/johndoe",
+    )
+    assert r.snippet == "Profile page"
+
+
+# --- LinkedInReviewResult ---
+
+
+def test_linkedin_review_result_valid() -> None:
+    """LinkedInReviewResult with required confidence is valid."""
+    r = LinkedInReviewResult(
+        profile_urls=["https://linkedin.com/in/jane"],
+        best_url="https://linkedin.com/in/jane",
+        confidence=80,
+    )
+    assert r.confidence == 80
+    assert r.best_url == "https://linkedin.com/in/jane"
+
+
+def test_linkedin_review_result_confidence_bounds() -> None:
+    """LinkedInReviewResult accepts 0 and 100."""
+    LinkedInReviewResult(profile_urls=[], best_url=None, confidence=0)
+    LinkedInReviewResult(profile_urls=[], best_url=None, confidence=100)
+
+
+def test_linkedin_review_result_confidence_out_of_bounds_raises() -> None:
+    """LinkedInReviewResult confidence must be 0-100."""
+    with pytest.raises(ValidationError):
+        LinkedInReviewResult(profile_urls=[], best_url=None, confidence=-1)
+    with pytest.raises(ValidationError):
+        LinkedInReviewResult(profile_urls=[], best_url=None, confidence=101)
+
+
+# --- LinkedInLookupResult ---
+
+
+def test_linkedin_lookup_result_found() -> None:
+    """LinkedInLookupResult status found has single url."""
+    author = AuthorInfo(name="Jane Doe")
+    r = LinkedInLookupResult(
+        author=author,
+        status="found",
+        url="https://linkedin.com/in/janedoe",
+        urls=[],
+    )
+    assert r.status == "found"
+    assert r.url == "https://linkedin.com/in/janedoe"
+    assert r.urls == []
+
+
+def test_linkedin_lookup_result_ambiguous() -> None:
+    """LinkedInLookupResult status ambiguous has urls list."""
+    author = AuthorInfo(name="John Smith")
+    r = LinkedInLookupResult(
+        author=author,
+        status="ambiguous",
+        url=None,
+        urls=["https://linkedin.com/in/johnsmith1", "https://linkedin.com/in/johnsmith2"],
+    )
+    assert r.status == "ambiguous"
+    assert r.url is None
+    assert len(r.urls) == 2
+
+
+def test_linkedin_lookup_result_not_found() -> None:
+    """LinkedInLookupResult status not_found has no url."""
+    author = AuthorInfo(name="Unknown")
+    r = LinkedInLookupResult(author=author, status="not_found", url=None, urls=[])
+    assert r.status == "not_found"
+    assert r.url is None
+    assert r.urls == []
