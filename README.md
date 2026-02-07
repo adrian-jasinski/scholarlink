@@ -36,7 +36,7 @@ OPENAI_API_KEY=sk-...
 - **`SCHOLARLINK_LLM_TEMPERATURE`** (optional): LLM temperature (default: 0.0).
 - **`SCHOLARLINK_LLM_MAX_TOKENS`** (optional): LLM max tokens (default: 2000).
 - **`SCHOLARLINK_CONFIG`** (optional): Path to a TOML config file. If unset, Scholarlink looks for `scholarlink.toml` in the current working directory.
-- **LinkedIn lookup** (for `--linkedin`): uses **DuckDuckGo** search (free, no API key). **`SCHOLARLINK_SEARCH_PROVIDER`** (optional): `duckduckgo` (default). **`SCHOLARLINK_SEARCH_MAX_RESULTS`** (optional): max search results per author (default: 10).
+- **LinkedIn lookup** (for `--linkedin`): uses **Google** search (scraping; free, no API key). **`SCHOLARLINK_SEARCH_PROVIDER`** (optional): `google` (only supported value). **`SCHOLARLINK_SEARCH_MAX_RESULTS`** (optional): max search results per author (default: 10). **`SCHOLARLINK_SEARCH_DELAY_SECONDS`** (optional): delay between each author's search to avoid rate limits (default: 2.0). **`SCHOLARLINK_LINKEDIN_VERBOSE`** (optional): set to `1` to print per-author search result counts and any Google search errors to stderr. If you see "not_found" for everyone, Google may be blocking requests; try a different network or a proxy and use verbose to confirm.
 
 **Optional config file**
 
@@ -53,9 +53,12 @@ uv run scholarlink "https://www.biorxiv.org/content/10.1101/2025.08.14.670328v1"
 # Output JSON: {"authors": [...], "authors_str": "..."}
 uv run scholarlink "https://www.biorxiv.org/content/10.1101/2025.08.14.670328v1" --json
 
-# Extract authors then find LinkedIn profiles (free DuckDuckGo search; requires OPENAI_API_KEY for LLM)
+# Extract authors then find LinkedIn profiles (Google search; requires OPENAI_API_KEY for LLM)
 uv run scholarlink --linkedin "https://www.biorxiv.org/content/10.1101/2025.08.14.670328v1"
 uv run scholarlink --linkedin --json "https://..."
+
+# If all authors show "not_found", Google may be blocking requests. Try a different network or proxy.
+# Run with SCHOLARLINK_LINKEDIN_VERBOSE=1 to see how many search results each author got.
 ```
 
 **Python API**

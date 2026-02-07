@@ -1,14 +1,15 @@
 """Tests for Scholarlink LinkedIn lookup (threshold logic, search_linkedin_profiles)."""
 
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from scholarlink.models import AuthorInfo, LinkedInLookupResult, LinkedInReviewResult
 from scholarlink.linkedin_lookup import (
-    _review_result_to_lookup,
-    _format_search_results,
     _author_context,
+    _format_search_results,
+    _linkedin_profile_urls_from_results,
+    _review_result_to_lookup,
     search_linkedin_profiles,
 )
 from scholarlink.models import SearchResult
@@ -108,6 +109,25 @@ def test_format_search_results_empty() -> None:
     assert _format_search_results([]) == "(No results)"
 
 
+def test_linkedin_profile_urls_from_results() -> None:
+    """_linkedin_profile_urls_from_results returns only URLs containing linkedin.com/in/."""
+    results = [
+        SearchResult(title="A", snippet="", url="https://www.linkedin.com/in/alice/"),
+        SearchResult(title="B", snippet="", url="https://example.com"),
+        SearchResult(title="C", snippet="", url="https://linkedin.com/in/bob"),
+    ]
+    urls = _linkedin_profile_urls_from_results(results)
+    assert urls == ["https://www.linkedin.com/in/alice/", "https://linkedin.com/in/bob"]
+
+
+def test_linkedin_profile_urls_from_results_empty() -> None:
+    """_linkedin_profile_urls_from_results returns [] when no profile URLs."""
+    results = [
+        SearchResult(title="A", snippet="", url="https://linkedin.com/company/foo"),
+    ]
+    assert _linkedin_profile_urls_from_results(results) == []
+
+
 def test_author_context() -> None:
     """_author_context returns dict with author fields."""
     author = AuthorInfo(
@@ -144,8 +164,10 @@ async def test_search_linkedin_profiles_returns_one_per_author() -> None:
         AuthorInfo(name="Bob"),
     ]
     mock_backend = AsyncMock()
-    mock_backend.search.return_value = [
-        SearchResult(title="LinkedIn", snippet="", url="https://linkedin.com/in/alice"),
+    # Return LinkedIn result for Alice only; for Bob return no LinkedIn URLs so fallback does not apply
+    mock_backend.search.side_effect = [
+        [SearchResult(title="LinkedIn", snippet="", url="https://linkedin.com/in/alice")],
+        [SearchResult(title="Other", snippet="", url="https://example.com")],
     ]
 
     async def mock_llm_review(author: AuthorInfo, results: list) -> LinkedInReviewResult:
@@ -161,7 +183,14 @@ async def test_search_linkedin_profiles_returns_one_per_author() -> None:
             confidence=0,
         )
 
-    with patch("scholarlink.linkedin_lookup._call_llm_review", side_effect=mock_llm_review):
+    mock_cfg = MagicMock()
+    mock_cfg.search_provider = "google"
+    mock_cfg.search_max_results = 10
+    mock_cfg.search_delay_seconds = 0
+    with patch("scholarlink.linkedin_lookup._call_llm_review", side_effect=mock_llm_review), patch(
+        "scholarlink.linkedin_lookup.get_config",
+        return_value=mock_cfg,
+    ):
         results = await search_linkedin_profiles(
             authors,
             search_backend=mock_backend,
@@ -182,3 +211,32 @@ async def test_search_linkedin_profiles_empty_authors() -> None:
     with patch("scholarlink.linkedin_lookup.get_search_backend"):
         results = await search_linkedin_profiles([])
     assert results == []
+
+
+@pytest.mark.asyncio
+async def test_search_linkedin_profiles_single_linkedin_fallback() -> None:
+    """When LLM returns not_found but raw results have exactly one LinkedIn profile URL, return ambiguous with that URL."""
+    author = AuthorInfo(name="Jane")
+    mock_backend = AsyncMock()
+    single_profile = "https://www.linkedin.com/in/jane-doe-123/"
+    mock_backend.search.return_value = [
+        SearchResult(title="Other", snippet="", url="https://example.com"),
+        SearchResult(title="Jane | LinkedIn", snippet="", url=single_profile),
+    ]
+
+    async def mock_llm_review(_author: AuthorInfo, _results: list) -> LinkedInReviewResult:
+        return LinkedInReviewResult(profile_urls=[], best_url=None, confidence=0)
+
+    mock_cfg = MagicMock()
+    mock_cfg.search_provider = "google"
+    mock_cfg.search_max_results = 10
+    mock_cfg.search_delay_seconds = 0
+    with patch("scholarlink.linkedin_lookup._call_llm_review", side_effect=mock_llm_review), patch(
+        "scholarlink.linkedin_lookup.get_config",
+        return_value=mock_cfg,
+    ):
+        results = await search_linkedin_profiles([author], search_backend=mock_backend, max_results=5)
+
+    assert len(results) == 1
+    assert results[0].status == "ambiguous"
+    assert results[0].urls == [single_profile]

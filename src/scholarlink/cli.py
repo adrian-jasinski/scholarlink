@@ -29,7 +29,7 @@ def run_cmd(
     linkedin: bool = typer.Option(
         False,
         "--linkedin",
-        help="After extracting authors, find LinkedIn profile(s) per author (uses free DuckDuckGo search)",
+        help="After extracting authors, find LinkedIn profile(s) per author (uses Google search)",
     ),
     mode: str = typer.Option(
         "normal",

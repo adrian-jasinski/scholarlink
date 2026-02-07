@@ -3,6 +3,7 @@
 import asyncio
 import json
 import os
+import sys
 from scholarlink.config import get_config
 from scholarlink.models import (
     AuthorInfo,
@@ -10,7 +11,7 @@ from scholarlink.models import (
     LinkedInReviewResult,
     SearchResult,
 )
-from scholarlink.search import SearchBackend, get_search_backend
+from scholarlink.search import SearchBackend, get_search_backend, _linkedin_verbose
 
 LINKEDIN_REVIEW_PROMPT = """Please review the attached search results and create the list of all the URLs of LinkedIn Profiles (not posts!).
 
@@ -38,6 +39,17 @@ Confidence rules:
 CONFIDENCE_HIGH = 75
 CONFIDENCE_LOW = 50
 MAX_URLS_AMBIGUOUS = 10
+LINKEDIN_PROFILE_PATH = "linkedin.com/in/"
+
+
+def _linkedin_profile_urls_from_results(results: list[SearchResult]) -> list[str]:
+    """Return list of URLs from results that look like LinkedIn profile pages (not posts)."""
+    urls: list[str] = []
+    for r in results:
+        u = (r.url or "").strip()
+        if LINKEDIN_PROFILE_PATH in u and u not in urls:
+            urls.append(u)
+    return urls
 
 
 def _format_search_results(results: list[SearchResult]) -> str:
@@ -141,8 +153,25 @@ async def _lookup_one(
     """Run search + LLM review + thresholds for one author."""
     query = f"{author.name} LinkedIn Profile"
     results = await backend.search(query, max_results=max_results)
+    if _linkedin_verbose():
+        n = len(results)
+        msg = f'Author "{author.name}": {n} search result(s)'
+        if n == 0:
+            msg += " (Google may have blocked the request; try a proxy or different network)."
+        print(msg, file=sys.stderr)
     review = await _call_llm_review(author, results)
-    return _review_result_to_lookup(author, review)
+    lookup = _review_result_to_lookup(author, review)
+    # Fallback: if LLM found no profiles but raw results contain any LinkedIn profile URLs, treat as ambiguous
+    if lookup.status == "not_found":
+        profile_urls = _linkedin_profile_urls_from_results(results)
+        if profile_urls:
+            lookup = LinkedInLookupResult(
+                author=author,
+                status="ambiguous",
+                url=None,
+                urls=profile_urls[:MAX_URLS_AMBIGUOUS],
+            )
+    return lookup
 
 
 async def search_linkedin_profiles(
@@ -154,10 +183,17 @@ async def search_linkedin_profiles(
     """
     For each author: search for "{name} LinkedIn Profile", run LLM review, apply confidence thresholds.
 
+    Processes authors sequentially with a delay between searches to avoid rate limits.
     Returns one LinkedInLookupResult per author (found / ambiguous / not_found).
     """
     cfg = get_config()
     backend = search_backend or get_search_backend(cfg.search_provider)
     limit = max_results if max_results is not None else cfg.search_max_results
-    tasks = [_lookup_one(author, backend, limit) for author in authors]
-    return list(await asyncio.gather(*tasks))
+    delay = cfg.search_delay_seconds
+    out: list[LinkedInLookupResult] = []
+    for i, author in enumerate(authors):
+        result = await _lookup_one(author, backend, limit)
+        out.append(result)
+        if delay > 0 and i < len(authors) - 1:
+            await asyncio.sleep(delay)
+    return out

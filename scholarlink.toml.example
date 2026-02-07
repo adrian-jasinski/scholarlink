@@ -32,10 +32,14 @@
 # LLM provider string (e.g. openai/gpt-4o-mini). Override with SCHOLARLINK_LLM_PROVIDER.
 # llm_provider = "openai/gpt-4o-mini"
 
-# LinkedIn profile lookup: search backend (duckduckgo = free, no API key).
+# LinkedIn profile lookup: search backend (only google is supported).
 # Override with SCHOLARLINK_SEARCH_PROVIDER.
-# search_provider = "duckduckgo"
+# search_provider = "google"
 
 # Max search results per author passed to LLM for LinkedIn lookup. Override with
 # SCHOLARLINK_SEARCH_MAX_RESULTS.
 # search_max_results = 10
+
+# Delay in seconds between each author's search (avoids rate limits). Override with
+# SCHOLARLINK_SEARCH_DELAY_SECONDS.
+# search_delay_seconds = 2.0

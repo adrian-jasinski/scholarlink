@@ -57,14 +57,19 @@ class ScholarlinkConfig(BaseModel):
         description="LLM provider string (e.g. openai/gpt-4o-mini).",
     )
     search_provider: str = Field(
-        default="duckduckgo",
-        description="Search backend for LinkedIn lookup: 'duckduckgo' (free, no API key).",
+        default="google",
+        description="Search backend for LinkedIn lookup: only 'google' is supported.",
     )
     search_max_results: int = Field(
         default=10,
         ge=1,
         le=20,
         description="Max number of search results to pass to LLM per author.",
+    )
+    search_delay_seconds: float = Field(
+        default=2.0,
+        ge=0,
+        description="Delay in seconds between each author's search (avoids rate limits).",
     )
 
     def protected_domains_frozenset(self) -> frozenset[str]:
@@ -117,6 +122,7 @@ def _load_toml_overrides() -> dict:
         "llm_provider",
         "search_provider",
         "search_max_results",
+        "search_delay_seconds",
     }
     return {k: v for k, v in data.items() if k in allowed}
 
@@ -172,6 +178,12 @@ def _env_overrides() -> dict:
     if env_val is not None:
         try:
             overrides["search_max_results"] = int(env_val)
+        except ValueError:
+            pass
+    env_val = os.getenv("SCHOLARLINK_SEARCH_DELAY_SECONDS")
+    if env_val is not None:
+        try:
+            overrides["search_delay_seconds"] = float(env_val)
         except ValueError:
             pass
     return overrides
