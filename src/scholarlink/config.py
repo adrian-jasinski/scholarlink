@@ -58,7 +58,7 @@ class ScholarlinkConfig(BaseModel):
     )
     search_provider: str = Field(
         default="google",
-        description="Search backend for LinkedIn lookup: only 'google' is supported.",
+        description="Search backend for LinkedIn lookup: 'google' (scraping) or 'browser' (Chromium via Playwright).",
     )
     search_max_results: int = Field(
         default=10,

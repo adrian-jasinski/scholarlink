@@ -32,7 +32,9 @@
 # LLM provider string (e.g. openai/gpt-4o-mini). Override with SCHOLARLINK_LLM_PROVIDER.
 # llm_provider = "openai/gpt-4o-mini"
 
-# LinkedIn profile lookup: search backend (only google is supported).
+# LinkedIn profile lookup: search backend.
+# - google: HTTP scraping (may get 429; try "browser" if blocked).
+# - browser: Chromium via Playwright (reliable; requires: uv run python -m playwright install chromium).
 # Override with SCHOLARLINK_SEARCH_PROVIDER.
 # search_provider = "google"
 
