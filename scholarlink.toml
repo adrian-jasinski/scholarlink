@@ -7,27 +7,71 @@
 
 # Seconds to wait when --cloudflare-manual is used and user completes
 # the Cloudflare challenge in the browser.
-cloudflare_manual_wait_seconds = 12
+cloudflare_manual_wait_seconds = 30
 
 # Crawl delay in seconds when not on a protected domain.
-# delay_default = 0.1
+delay_default = 0.1
 
 # Crawl delay in seconds when on a protected domain (without manual Cloudflare).
-# delay_protected = 3.0
+delay_protected = 3.0
 
 # Default Cloudflare-protected hostnames (undetected browser + stealth).
 # Override with SCHOLARLINK_PROTECTED_DOMAINS env (comma-separated).
 protected_domains = ["biorxiv.org", "www.biorxiv.org"]
 
 # Phrases that indicate Cloudflare challenge text leaked into extracted content.
-# cloudflare_phrases = ["cloudflare", "verifying you are human", "ray id"]
+cloudflare_phrases = ["cloudflare", "verifying you are human", "ray id"]
 
 # LLM instruction for author extraction. Long text is easier to edit here than in .env.
-# authors_extraction_instruction = """..."""
+authors_extraction_instruction = """..."""
 
 # LLM generation parameters.
-# llm_temperature = 0.0
-# llm_max_tokens = 2000
+llm_temperature = 0.0
+llm_max_tokens = 2000
 
 # LLM provider string (e.g. openai/gpt-4o-mini). Override with SCHOLARLINK_LLM_PROVIDER.
-# llm_provider = "openai/gpt-4o-mini"
+llm_provider = "openai/gpt-4o-mini"
+
+# LinkedIn profile lookup: search backend
+# Options: 'google' (HTTP scraping), 'brave' (Brave Search API), 'browser' (Chromium + Google), 'bing' (Chromium + Bing)
+# Override with SCHOLARLINK_SEARCH_PROVIDER.
+# Note: 'brave' requires BRAVE_API_KEY environment variable.
+search_provider = "google"
+
+# Max search results per author passed to LLM for LinkedIn lookup. Override with
+# SCHOLARLINK_SEARCH_MAX_RESULTS.
+search_max_results = 10
+
+# Delay in seconds between each author's search (avoids rate limits). Override with
+# SCHOLARLINK_SEARCH_DELAY_SECONDS.
+search_delay_seconds = 2.0
+
+# Brave API backend configuration (only used when search_provider = "brave")
+# HTTP timeout in seconds for Brave Search API requests. Override with
+# SCHOLARLINK_BRAVE_TIMEOUT_SECONDS.
+brave_timeout_seconds = 30.0
+
+# Browser backend configuration (only used when search_provider = "browser")
+# Run browser in headless mode (no visible window). Set to false for debugging.
+# Override with SCHOLARLINK_BROWSER_HEADLESS.
+browser_headless = true
+
+# Enable stealth mode with anti-detection features (recommended for avoiding bot detection).
+# Override with SCHOLARLINK_BROWSER_USE_STEALTH.
+browser_use_stealth = true
+
+# Use persistent browser context to save cookies between runs (reduces rate limiting).
+# Override with SCHOLARLINK_BROWSER_PERSISTENT_CONTEXT.
+browser_persistent_context = false
+
+# Custom directory for browser profile data. If not set, defaults to ~/.scholarlink/browser-data
+# when persistent_context is enabled. Override with SCHOLARLINK_BROWSER_USER_DATA_DIR.
+# browser_user_data_dir = "/path/to/browser/data"
+
+# Optional proxy server URL for the browser backend (useful if you're getting blocked).
+# Override with SCHOLARLINK_BROWSER_PROXY.
+# browser_proxy = "http://proxy.example.com:8080"
+
+# Seconds to wait before closing browser when headless=false (for debugging/inspection).
+# Override with SCHOLARLINK_BROWSER_DEBUG_WAIT_SECONDS.
+browser_debug_wait_seconds = 5.0

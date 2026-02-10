@@ -71,6 +71,38 @@ class ScholarlinkConfig(BaseModel):
         ge=0,
         description="Delay in seconds between each author's search (avoids rate limits).",
     )
+    # Brave API backend configuration
+    brave_timeout_seconds: float = Field(
+        default=30.0,
+        ge=1.0,
+        description="HTTP timeout in seconds for Brave Search API requests.",
+    )
+    # Browser backend configuration
+    browser_headless: bool = Field(
+        default=True,
+        description="Run browser in headless mode (no visible window). Set to false for debugging.",
+    )
+    browser_use_stealth: bool = Field(
+        default=True,
+        description="Enable stealth mode with anti-detection features (recommended).",
+    )
+    browser_persistent_context: bool = Field(
+        default=False,
+        description="Use persistent browser context to save cookies between runs.",
+    )
+    browser_user_data_dir: str | None = Field(
+        default=None,
+        description="Custom directory for browser profile data. Defaults to ~/.scholarlink/browser-data if persistent_context is enabled.",
+    )
+    browser_proxy: str | None = Field(
+        default=None,
+        description="Optional proxy server URL (e.g., http://proxy.example.com:8080).",
+    )
+    browser_debug_wait_seconds: float = Field(
+        default=5.0,
+        ge=0,
+        description="Seconds to wait before closing browser when headless=false (for debugging/inspection).",
+    )
 
     def protected_domains_frozenset(self) -> frozenset[str]:
         """Return protected_domains as a frozenset (lowercased)."""
@@ -123,6 +155,13 @@ def _load_toml_overrides() -> dict:
         "search_provider",
         "search_max_results",
         "search_delay_seconds",
+        "brave_timeout_seconds",
+        "browser_headless",
+        "browser_use_stealth",
+        "browser_persistent_context",
+        "browser_user_data_dir",
+        "browser_proxy",
+        "browser_debug_wait_seconds",
     }
     return {k: v for k, v in data.items() if k in allowed}
 
@@ -184,6 +223,35 @@ def _env_overrides() -> dict:
     if env_val is not None:
         try:
             overrides["search_delay_seconds"] = float(env_val)
+        except ValueError:
+            pass
+    # Brave API backend configuration
+    env_val = os.getenv("SCHOLARLINK_BRAVE_TIMEOUT_SECONDS")
+    if env_val is not None:
+        try:
+            overrides["brave_timeout_seconds"] = float(env_val)
+        except ValueError:
+            pass
+    # Browser backend configuration
+    env_val = os.getenv("SCHOLARLINK_BROWSER_HEADLESS")
+    if env_val is not None:
+        overrides["browser_headless"] = env_val.strip().lower() in ("1", "true", "yes")
+    env_val = os.getenv("SCHOLARLINK_BROWSER_USE_STEALTH")
+    if env_val is not None:
+        overrides["browser_use_stealth"] = env_val.strip().lower() in ("1", "true", "yes")
+    env_val = os.getenv("SCHOLARLINK_BROWSER_PERSISTENT_CONTEXT")
+    if env_val is not None:
+        overrides["browser_persistent_context"] = env_val.strip().lower() in ("1", "true", "yes")
+    env_val = os.getenv("SCHOLARLINK_BROWSER_USER_DATA_DIR")
+    if env_val is not None:
+        overrides["browser_user_data_dir"] = env_val
+    env_val = os.getenv("SCHOLARLINK_BROWSER_PROXY")
+    if env_val is not None:
+        overrides["browser_proxy"] = env_val
+    env_val = os.getenv("SCHOLARLINK_BROWSER_DEBUG_WAIT_SECONDS")
+    if env_val is not None:
+        try:
+            overrides["browser_debug_wait_seconds"] = float(env_val)
         except ValueError:
             pass
     return overrides
