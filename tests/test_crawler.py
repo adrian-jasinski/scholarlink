@@ -54,6 +54,16 @@ def test_is_protected_domain_empty_or_invalid_false() -> None:
     assert _is_protected_domain("not-a-url") is False
 
 
+def test_default_extraction_instruction_focuses_on_name_and_affiliation() -> None:
+    """Default authors_extraction_instruction focuses on name and affiliation, not ORCID."""
+    from scholarlink.config import ScholarlinkConfig
+
+    defaults = ScholarlinkConfig()
+    instruction = defaults.authors_extraction_instruction
+    assert "affiliation" in instruction
+    assert "Do not extract ORCID" in instruction
+
+
 def test_get_protected_domains_default(monkeypatch: pytest.MonkeyPatch) -> None:
     """With env unset, returns default frozenset."""
     monkeypatch.delenv("SCHOLARLINK_PROTECTED_DOMAINS", raising=False)

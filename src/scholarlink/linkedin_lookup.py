@@ -18,11 +18,8 @@ LINKEDIN_REVIEW_PROMPT = """Please review the attached search results and create
 Author we are looking for:
 - Name: {name}
 - Affiliation: {affiliation}
-- Contact: {contact}
-- ORCID: {orcid}
-- Other: {other}
 
-Search results (query: "{name} LinkedIn Profile"):
+Search results (query: "{query}"):
 {search_results_text}
 
 Output valid JSON only, with exactly these keys:
@@ -95,7 +92,18 @@ def _review_result_to_lookup(author: AuthorInfo, review: LinkedInReviewResult) -
     )
 
 
-async def _call_llm_review(author: AuthorInfo, search_results: list[SearchResult]) -> LinkedInReviewResult:
+def _linkedin_search_query(author: AuthorInfo) -> str:
+    """Build search query: name + affiliation when present, else name only."""
+    if author.affiliation and author.affiliation.strip():
+        return f"{author.name} {author.affiliation.strip()} LinkedIn Profile"
+    return f"{author.name} LinkedIn Profile"
+
+
+async def _call_llm_review(
+    author: AuthorInfo,
+    search_results: list[SearchResult],
+    query: str,
+) -> LinkedInReviewResult:
     """Call configured LLM to get LinkedInReviewResult from author + search results."""
     cfg = get_config()
     api_key = os.getenv("OPENAI_API_KEY")
@@ -110,6 +118,7 @@ async def _call_llm_review(author: AuthorInfo, search_results: list[SearchResult
         )
     model = provider.split("/", 1)[1] or "gpt-4o-mini"
     ctx = _author_context(author)
+    ctx["query"] = query
     search_results_text = _format_search_results(search_results)
     prompt = LINKEDIN_REVIEW_PROMPT.format(
         search_results_text=search_results_text,
@@ -151,7 +160,7 @@ async def _lookup_one(
     max_results: int,
 ) -> LinkedInLookupResult:
     """Run search + LLM review + thresholds for one author."""
-    query = f"{author.name} LinkedIn Profile"
+    query = _linkedin_search_query(author)
     results = await backend.search(query, max_results=max_results)
     if _linkedin_verbose():
         n = len(results)
@@ -159,7 +168,7 @@ async def _lookup_one(
         if n == 0:
             msg += " (Google may have blocked the request; try a proxy or different network)."
         print(msg, file=sys.stderr)
-    review = await _call_llm_review(author, results)
+    review = await _call_llm_review(author, results, query=query)
     lookup = _review_result_to_lookup(author, review)
     # Fallback: if LLM found no profiles but raw results contain any LinkedIn profile URLs, treat as ambiguous
     if lookup.status == "not_found":
@@ -181,7 +190,7 @@ async def search_linkedin_profiles(
     max_results: int | None = None,
 ) -> list[LinkedInLookupResult]:
     """
-    For each author: search for "{name} LinkedIn Profile", run LLM review, apply confidence thresholds.
+    For each author: search using name only or name + affiliation when present, run LLM review, apply confidence thresholds.
 
     Processes authors sequentially with a delay between searches to avoid rate limits.
     Returns one LinkedInLookupResult per author (found / ambiguous / not_found).

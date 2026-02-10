@@ -22,7 +22,8 @@
 # Phrases that indicate Cloudflare challenge text leaked into extracted content.
 # cloudflare_phrases = ["cloudflare", "verifying you are human", "ray id"]
 
-# LLM instruction for author extraction. Long text is easier to edit here than in .env.
+# LLM instruction for author extraction. Default focuses on name and affiliation only (no ORCID).
+# Long text is easier to edit here than in .env.
 # authors_extraction_instruction = """..."""
 
 # LLM generation parameters.

@@ -8,16 +8,13 @@ from pydantic import BaseModel, Field
 
 # Default extraction instruction (long string)
 _DEFAULT_AUTHORS_EXTRACTION_INSTRUCTION = """
-From this scientific article page, extract all publication authors with details.
+From this scientific article page, extract all publication authors.
 Return a single JSON object with exactly one key "authors" whose value is a list of author objects.
-For each author, extract in order of appearance:
+For each author, extract in order of appearance only:
 - name: full name (required)
-- affiliation: university, department, or institution if shown
-- contact: email or other contact if available
-- orcid: ORCID ID if shown (e.g. from "View ORCID Profile" link)
-- other: any other author data (roles, identifiers, etc.) if available
+- affiliation: university, department, company, or institution if shown (e.g. MIT, Stanford, Google DeepMind, Facebook)
+Do not extract ORCID or other identifiers; extract only name and affiliation.
 Use empty string for missing optional fields. Preserve the exact spelling and order.
-Put ORCID ID in orcid, not in name.
 """.strip()
 
 

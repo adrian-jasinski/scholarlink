@@ -1,6 +1,6 @@
 # Scholarlink
 
-Extract publication authors from scientific paper URLs using [Crawl4AI](https://github.com/unclecode/crawl4ai). Supports bioRxiv, PNAS, and other publishers via LLM-based extraction.
+Extract publication authors from scientific paper URLs using [Crawl4AI](https://github.com/unclecode/crawl4ai). Supports bioRxiv, PNAS, and other publishers via LLM-based extraction. The default pipeline extracts **author name** and **affiliation** (e.g. MIT, Stanford, Google DeepMind) only; it does not extract ORCID or other identifiers. For LinkedIn lookup, search uses the author name only when affiliation is missing, and both name and affiliation when present.
 
 ## Install
 
@@ -114,9 +114,13 @@ asyncio.run(main())
 | **Browser** (Bing) | 🐢 Slow (5-10s) | ✅ Good | Medium (Playwright) | Low | Free |
 | **Google scraping** | ⚡ Fast (2-5s) | ⚠️ Frequent 429s | Easy | Very low | Free |
 
+
+
 **Recommendation**: Use Brave API if you have an API key (free tier is generous). Otherwise, use Browser backend with Google or Bing.
 
-**LinkedIn profile lookup** (after extracting authors):
+Check: [https://brave.com/search/api/] - next select plan -> generate API key.
+
+**LinkedIn profile lookup** (after extracting authors): For each author, search uses name only when affiliation was not extracted, or both name and affiliation when available, then an LLM picks the best profile from the results.
 
 ```python
 import asyncio
