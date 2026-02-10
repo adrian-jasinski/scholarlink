@@ -18,7 +18,7 @@ def _csv_two_authors() -> str:
 
 
 def test_cli_invoke_success_stdout_csv() -> None:
-    """Invoke with URL returns exit 0 and stdout is CSV (header + one line per author)."""
+    """paper <url> returns exit 0 and stdout is CSV (header + one line per author)."""
     authors = [
         AuthorInfo(name="Alice", affiliation="MIT", contact="a@b.com"),
         AuthorInfo(name="Bob", affiliation="Stanford", orcid="0000-0002-3456-7890"),
@@ -31,7 +31,7 @@ def test_cli_invoke_success_stdout_csv() -> None:
         return_value=(authors, csv_str),
     ):
         runner = typer.testing.CliRunner()
-        result = runner.invoke(app, ["https://example.com/paper"])
+        result = runner.invoke(app, ["paper", "https://example.com/paper"])
     assert result.exit_code == 0
     assert "name,affiliation,contact,orcid,other" in result.stdout
     assert "Alice" in result.stdout and "Bob" in result.stdout
@@ -40,7 +40,7 @@ def test_cli_invoke_success_stdout_csv() -> None:
 def test_cli_invoke_invalid_mode_exit_2() -> None:
     """--mode invalid returns exit 2 and stderr mentions mode."""
     runner = typer.testing.CliRunner()
-    result = runner.invoke(app, ["--mode=invalid", "https://example.com/paper"])
+    result = runner.invoke(app, ["paper", "--mode=invalid", "https://example.com/paper"])
     assert result.exit_code == 2
     assert "mode" in result.stderr.lower()
 
@@ -53,13 +53,13 @@ def test_cli_extraction_error_exit_1() -> None:
         side_effect=ExtractionError("Crawl failed for URL"),
     ):
         runner = typer.testing.CliRunner()
-        result = runner.invoke(app, ["https://example.com/paper"])
+        result = runner.invoke(app, ["paper", "https://example.com/paper"])
     assert result.exit_code == 1
     assert "Crawl failed" in result.stderr
 
 
 def test_cli_json_output() -> None:
-    """--json returns exit 0 and valid JSON with authors (list of objects) and csv."""
+    """paper --json returns exit 0 and valid JSON with authors (list of objects) and csv."""
     authors = [AuthorInfo(name="Alice", affiliation="MIT")]
     csv_str = "name,affiliation,contact,orcid,other\nAlice,MIT,,,"
 
@@ -69,7 +69,7 @@ def test_cli_json_output() -> None:
         return_value=(authors, csv_str),
     ):
         runner = typer.testing.CliRunner()
-        result = runner.invoke(app, ["--json", "https://example.com/paper"])
+        result = runner.invoke(app, ["paper", "--json", "https://example.com/paper"])
     assert result.exit_code == 0
     data = json.loads(result.stdout)
     assert "authors" in data
@@ -110,7 +110,7 @@ def test_cli_linkedin_flag_success() -> None:
         return_value=lookup_results,
     ):
         runner = typer.testing.CliRunner()
-        result = runner.invoke(app, ["--linkedin", "https://example.com/paper"])
+        result = runner.invoke(app, ["paper", "--linkedin", "https://example.com/paper"])
     assert result.exit_code == 0
     assert "Alice" in result.stdout
     assert "found" in result.stdout
@@ -140,10 +140,73 @@ def test_cli_linkedin_flag_json() -> None:
         return_value=lookup_results,
     ):
         runner = typer.testing.CliRunner()
-        result = runner.invoke(app, ["--linkedin", "--json", "https://example.com/paper"])
+        result = runner.invoke(app, ["paper", "--linkedin", "--json", "https://example.com/paper"])
     assert result.exit_code == 0
     data = json.loads(result.stdout)
     assert isinstance(data, list)
     assert len(data) == 1
     assert data[0]["status"] == "ambiguous"
     assert data[0]["urls"] == ["https://linkedin.com/in/bob1"]
+
+
+def test_cli_output_writes_csv(tmp_path) -> None:
+    """paper --output FILE calls extract_authors_single and writes CSV, prints confirmation."""
+    with patch(
+        "scholarlink.cli.extract_authors_single",
+        new_callable=AsyncMock,
+        return_value=[
+            {"author_name": "Alice", "link": "https://example.com/paper"},
+        ],
+    ):
+        runner = typer.testing.CliRunner()
+        out_file = tmp_path / "authors.csv"
+        result = runner.invoke(app, ["paper", "https://example.com/paper", "--output", str(out_file)])
+    assert result.exit_code == 0
+    assert "Wrote CSV to" in result.stdout
+    assert str(out_file) in result.stdout
+
+
+def test_cli_from_file_success(tmp_path) -> None:
+    """from-file subcommand calls extract_authors_from_file and prints confirmation."""
+    in_file = tmp_path / "in.csv"
+    in_file.write_text("url\nhttps://a.com\n", encoding="utf-8")
+    out_file = tmp_path / "out.csv"
+
+    with patch(
+        "scholarlink.cli.extract_authors_from_file",
+        new_callable=AsyncMock,
+    ):
+        runner = typer.testing.CliRunner()
+        result = runner.invoke(
+            app,
+            [
+                "from-file",
+                str(in_file),
+                "--output",
+                str(out_file),
+            ],
+        )
+    assert result.exit_code == 0
+    assert "Wrote CSV to" in result.stdout
+    assert str(out_file) in result.stdout
+
+
+def test_cli_from_file_linkedin_flag(tmp_path) -> None:
+    """from-file with --linkedin passes linkedin=True."""
+    in_file = tmp_path / "in.csv"
+    in_file.write_text("url\nhttps://a.com\n", encoding="utf-8")
+    out_file = tmp_path / "out.csv"
+
+    with patch(
+        "scholarlink.cli.extract_authors_from_file",
+        new_callable=AsyncMock,
+    ) as mock_fn:
+        runner = typer.testing.CliRunner()
+        runner.invoke(
+            app,
+            ["from-file", str(in_file), "--output", str(out_file), "--linkedin"],
+        )
+        mock_fn.assert_called_once()
+        call_kw = mock_fn.call_args[1]
+        assert call_kw["linkedin"] is True
+        assert call_kw["output_path"] == str(out_file)

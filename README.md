@@ -64,30 +64,44 @@ You can put non-secret options in a TOML file (e.g. `scholarlink.toml` in the pr
 
 **CLI**
 
+Single paper URL (use the `paper` command):
+
 ```bash
 # Print comma-separated authors
-uv run scholarlink "https://www.biorxiv.org/content/10.1101/2025.08.14.670328v1"
+uv run scholarlink paper "https://www.biorxiv.org/content/10.1101/2025.08.14.670328v1"
 
-# Output JSON: {"authors": [...], "authors_str": "..."}
-uv run scholarlink "https://www.biorxiv.org/content/10.1101/2025.08.14.670328v1" --json
+# Output JSON: {"authors": [...], "csv": "..."}
+uv run scholarlink paper "https://www.biorxiv.org/content/10.1101/2025.08.14.670328v1" --json
+
+# Write CSV (author_name, link) to file; add --linkedin for LinkedIn column
+uv run scholarlink paper "https://..." --output authors.csv
+uv run scholarlink paper "https://..." --output authors.csv --linkedin
 
 # Extract authors then find LinkedIn profiles (Google search; requires OPENAI_API_KEY for LLM)
-uv run scholarlink --linkedin "https://www.biorxiv.org/content/10.1101/2025.08.14.670328v1"
-uv run scholarlink --linkedin --json "https://..."
+uv run scholarlink paper --linkedin "https://www.biorxiv.org/content/10.1101/2025.08.14.670328v1"
+uv run scholarlink paper --linkedin --json "https://..."
 
 # Recommended: Use Brave Search API (fast, reliable, no rate limits)
 # Get free API key at https://api.search.brave.com/ (2,000 queries/month free)
 export BRAVE_API_KEY=your-key-here
 export SCHOLARLINK_SEARCH_PROVIDER=brave
-uv run scholarlink --linkedin "https://..."
+uv run scholarlink paper --linkedin "https://..."
 
 # Alternative: Use browser backend if you don't have Brave API key
 # Requires: uv run python -m playwright install chromium
 export SCHOLARLINK_SEARCH_PROVIDER=browser
-uv run scholarlink --linkedin "https://..."
+uv run scholarlink paper --linkedin "https://..."
 
 # Run with SCHOLARLINK_LINKEDIN_VERBOSE=1 to see per-author search result counts
 export SCHOLARLINK_LINKEDIN_VERBOSE=1
+```
+
+Batch from CSV or Excel (list of paper URLs):
+
+```bash
+# Read links from CSV or .xlsx (first column or --column NAME), write one CSV with all authors
+uv run scholarlink from-file links.csv --output authors.csv
+uv run scholarlink from-file links.xlsx --column url --output authors.csv --linkedin
 ```
 
 **Python API**
@@ -131,6 +145,41 @@ async def main():
     results = await find_linkedin_profiles(authors_list)
     for r in results:
         print(r.author.name, r.status, r.url or r.urls)
+
+asyncio.run(main())
+```
+
+**Single URL to output CSV** (`extract_authors_single`): Returns rows (author_name, link, optional linkedin) and can write a CSV file.
+
+```python
+import asyncio
+from scholarlink import extract_authors_single
+
+async def main():
+    rows = await extract_authors_single(
+        "https://example.com/paper",
+        linkedin=True,
+        output_path="authors.csv",
+    )
+    for r in rows:
+        print(r["author_name"], r["link"], r.get("linkedin", ""))
+
+asyncio.run(main())
+```
+
+**Batch from CSV/Excel** (`extract_authors_from_file`): Read paper URLs from a CSV or Excel file, extract authors for each, write one combined CSV.
+
+```python
+import asyncio
+from scholarlink import extract_authors_from_file
+
+async def main():
+    await extract_authors_from_file(
+        "links.csv",
+        column="url",
+        linkedin=True,
+        output_path="authors.csv",
+    )
 
 asyncio.run(main())
 ```

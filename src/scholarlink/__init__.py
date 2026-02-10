@@ -2,8 +2,18 @@
 
 from dotenv import load_dotenv
 
-from scholarlink.api import extract_authors, find_linkedin_profiles
+from scholarlink.api import (
+    extract_authors,
+    extract_authors_from_file,
+    extract_authors_single,
+    find_linkedin_profiles,
+)
 
 load_dotenv()
 
-__all__ = ["extract_authors", "find_linkedin_profiles"]
+__all__ = [
+    "extract_authors",
+    "extract_authors_from_file",
+    "extract_authors_single",
+    "find_linkedin_profiles",
+]
